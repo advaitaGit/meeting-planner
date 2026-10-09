@@ -5,6 +5,22 @@ import pytz
 st.set_page_config(page_title="Meeting Planner & Email Assist", page_icon="🌍", layout="wide")
 
 # ==========================================
+# PASSWORD PROTECTION
+# ==========================================
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
+
+if not st.session_state.authenticated:
+    st.title("🔒 Login Required")
+    pwd = st.text_input("Enter Password:", type="password")
+    if pwd == "admin123":
+        st.session_state.authenticated = True
+        st.rerun()
+    elif pwd:
+        st.error("Incorrect Password")
+    st.stop()
+
+# ==========================================
 # CUSTOM CSS FOR CROSSHAIR HOVER, CLICK-TO-STICK & GRID
 # ==========================================
 st.markdown("""
@@ -50,15 +66,15 @@ st.markdown("""
     .tz-night { background-color: rgba(128, 128, 128, 0.1); opacity: 0.8; }
     .tz-day { background-color: transparent; }
     
-    /* PST Working Hours (7 AM - 5 PM) - Brighter Neon Purple */
+    /* PST Working Hours - Brighter Neon Purple */
     .tz-working { background-color: rgba(224, 64, 251, 0.25) !important; }
 
-    /* Break Time (12 PM) - Yellow */
+    /* Break Time - Yellow */
     .tz-break { background-color: rgba(255, 235, 59, 0.25) !important; color: #FBC02D; font-weight: bold; }
     .tz-break-left { border-left: 2px solid #FBC02D !important; }
     .tz-break-right { border-right: 2px solid #FBC02D !important; }
 
-    /* Training Time (7 AM - 8 AM) - Light Blue */
+    /* Training Time - Light Blue */
     .tz-training { background-color: rgba(3, 169, 244, 0.3) !important; color: #4FC3F7; font-weight: bold; }
     .tz-training-left { border-left: 2px solid #29B6F6 !important; }
     .tz-training-right { border-right: 2px solid #29B6F6 !important; }
@@ -126,44 +142,38 @@ TZ_OPTIONS = {
     "UTC / GMT": "UTC"
 }
 
-# Defined PST Schedule Blocks
-AVAIL_HOURS = [9, 13, 15, 16] # 9 AM, 1 PM, 3 PM, 4 PM
-BREAK_HOURS = [12]            # 12 PM
-TRAINING_HOURS = [7]          # 7 AM
-
-def get_cell_classes(h, booked_h_vals):
+def get_cell_classes(h, booked_h, avail_h, break_h, train_h, w_start, w_end):
     classes = []
-    if h in booked_h_vals:
+    if h in booked_h:
         classes.append("tz-booked")
-        if h - 1 not in booked_h_vals: classes.append("tz-booked-left")
-        if h + 1 not in booked_h_vals: classes.append("tz-booked-right")
-    elif h in BREAK_HOURS:
+        if h - 1 not in booked_h: classes.append("tz-booked-left")
+        if h + 1 not in booked_h: classes.append("tz-booked-right")
+    elif h in break_h:
         classes.append("tz-break")
-        if h - 1 not in BREAK_HOURS: classes.append("tz-break-left")
-        if h + 1 not in BREAK_HOURS: classes.append("tz-break-right")
-    elif h in TRAINING_HOURS:
+        if h - 1 not in break_h: classes.append("tz-break-left")
+        if h + 1 not in break_h: classes.append("tz-break-right")
+    elif h in train_h:
         classes.append("tz-training")
-        if h - 1 not in TRAINING_HOURS: classes.append("tz-training-left")
-        if h + 1 not in TRAINING_HOURS: classes.append("tz-training-right")
-    elif h in AVAIL_HOURS:
+        if h - 1 not in train_h: classes.append("tz-training-left")
+        if h + 1 not in train_h: classes.append("tz-training-right")
+    elif h in avail_h:
         classes.append("tz-avail")
-        if h - 1 not in AVAIL_HOURS: classes.append("tz-avail-left")
-        if h + 1 not in AVAIL_HOURS: classes.append("tz-avail-right")
-    elif 7 <= h <= 16:
+        if h - 1 not in avail_h: classes.append("tz-avail-left")
+        if h + 1 not in avail_h: classes.append("tz-avail-right")
+    elif w_start <= h <= w_end:
         classes.append("tz-working")
     return " ".join(classes)
 
 st.title("🌍 Global Time Zone Dashboard")
 
-# Perfectly leveled 3-left / 3-right legend
 st.markdown("**Legend:**")
 l_col1, l_col2 = st.columns(2)
 with l_col1:
-    st.markdown("🟣 **Purple**: Working Hours (7 AM - 5 PM PST)")
-    st.markdown("🟢 **Green**: Available (9 AM - 10 AM, 1 PM - 2 PM, 3 PM - 5 PM PST)")
-    st.markdown("🟡 **Yellow**: Break (12 PM PST)")
+    st.markdown("🟣 **Purple**: Working Hours")
+    st.markdown("🟢 **Green**: Available for Meetings")
+    st.markdown("🟡 **Yellow**: Break")
 with l_col2:
-    st.markdown("🔵 **Light Blue**: Training (7 AM PST)")
+    st.markdown("🔵 **Light Blue**: Training")
     st.markdown("🔴 **Red**: Booked Meetings")
     st.markdown("🖱️ **Interactive**: **Hover** for Blue Crosshair | **Click** a cell to lock!")
 
@@ -171,11 +181,34 @@ dashboard_placeholder = st.container()
 st.divider()
 
 # ==========================================
-# PLANNER CONTROLS
+# PLANNER & SCHEDULE CONTROLS
 # ==========================================
-st.subheader("⚙️ Planner Controls")
+st.subheader("⚙️ Planner & Schedule Controls")
 
 with st.container(border=True):
+    st.markdown("##### 1. Staff Schedule Configuration (Base: PST)")
+    hour_opts = {f"{h%12 or 12} {'AM' if h < 12 else 'PM'}": h for h in range(24)}
+    
+    sc1, sc2 = st.columns(2)
+    with sc1:
+        w_start, w_end = st.slider("General Working Hours (PST)", 0, 23, (7, 16), format="%d:00")
+    with sc2:
+        break_hours_input = st.multiselect("🟡 Break Time", options=list(hour_opts.keys()), default=["12 PM"])
+    
+    sc3, sc4 = st.columns(2)
+    with sc3:
+        training_hours_input = st.multiselect("🔵 Training Time", options=list(hour_opts.keys()), default=["7 AM"])
+    with sc4:
+        avail_hours_input = st.multiselect("🟢 Available Time", options=list(hour_opts.keys()), default=["9 AM", "1 PM", "3 PM", "4 PM"])
+    
+    # Map selected options back to integers
+    BREAK_HOURS = [hour_opts[k] for k in break_hours_input]
+    TRAINING_HOURS = [hour_opts[k] for k in training_hours_input]
+    AVAIL_HOURS = [hour_opts[k] for k in avail_hours_input]
+
+    st.divider()
+
+    st.markdown("##### 2. Dashboard View Options")
     col1, col2, col3 = st.columns([1.5, 1, 1.5])
     with col1:
         selected_tzs = st.multiselect(
@@ -186,7 +219,8 @@ with st.container(border=True):
     with col2:
         time_format = st.radio("Time Format:", ["12-Hour (AM/PM)", "24-Hour"])
     with col3:
-        meeting_options = {f"{h%12 or 12} {'AM' if h < 12 else 'PM'} PST": h for h in range(7, 18)}
+        # Dynamically limit zoom meeting options to configured working hours to keep list clean
+        meeting_options = {f"{h%12 or 12} {'AM' if h < 12 else 'PM'} PST": h for h in range(w_start, w_end + 1)}
         booked_hours = st.multiselect("🔴 Mark Booked Zoom Meetings (PST):", options=list(meeting_options.keys()), help="Select hours to highlight in red on the grid.")
         booked_h_vals = [meeting_options[k] for k in booked_hours]
 
@@ -205,7 +239,7 @@ with dashboard_placeholder:
         for h in range(24):
             display_time = start_of_day + timedelta(hours=h)
             h_str = display_time.strftime("%I %p").lstrip("0").lower() if "12" in time_format else display_time.strftime("%H:00")
-            cell_class = get_cell_classes(h, booked_h_vals)
+            cell_class = get_cell_classes(h, booked_h_vals, AVAIL_HOURS, BREAK_HOURS, TRAINING_HOURS, w_start, w_end)
             html += f'<th class="{cell_class}">{h_str}</th>'
         html += '</tr>'
 
@@ -223,7 +257,7 @@ with dashboard_placeholder:
                 tz_time = base_time.astimezone(tz_obj)
                 local_hour = tz_time.hour
                 bg_class = "tz-day" if 7 <= local_hour < 19 else "tz-night"
-                cell_class = f"{bg_class} {get_cell_classes(h, booked_h_vals)}"
+                cell_class = f"{bg_class} {get_cell_classes(h, booked_h_vals, AVAIL_HOURS, BREAK_HOURS, TRAINING_HOURS, w_start, w_end)}"
                 t_str = tz_time.strftime("%I %p").lstrip("0").lower() if "12" in time_format else tz_time.strftime("%H:00")
                 date_str = tz_time.strftime("%b %d")
                 html += f'<td class="{cell_class}" tabindex="0">{t_str}<br><span class="sub-text">{date_str}</span></td>'
@@ -240,17 +274,7 @@ st.header("✉️ Email Template Assistant")
 st.markdown("Use this tool to automatically draft your follow-up email. It translates your fixed PST availability into the client's local time zone.")
 
 with st.container(border=True):
-    col_tz, col_ph, col_em, col_case = st.columns(4)
-    with col_tz:
-        target_tz_select = st.selectbox("Client Time Zone:", options=list(TZ_OPTIONS.keys()), index=2) # Default MT
-    with col_ph:
-        client_phone = st.text_input("Phone Number:", placeholder="e.g. 555-0198")
-    with col_em:
-        client_email = st.text_input("Email:", placeholder="e.g. client@domain.com")
-    with col_case:
-        case_number = st.text_input("Case Number:", placeholder="e.g. 00000000")
-
-    support_phone = st.text_input("Your Support Line (number + option):", placeholder="e.g. 555-0100, option 2")
+    target_tz_select = st.selectbox("Client Time Zone:", options=list(TZ_OPTIONS.keys()), index=2) # Default MT
 
     # Dates Row (Auto-populating behavior)
     st.markdown("**Meeting Dates:**")
@@ -294,10 +318,6 @@ def get_slot_time_str(date_val, start_hour, end_hour):
     return f"{start_target.strftime('%I:%M %p').lstrip('0')} - {end_target.strftime('%I:%M %p').lstrip('0')}"
 
 def get_cell_html(slot_key, d, start_h, end_h):
-    """
-    To fix the Outlook copy-paste bug, we explicitly set the color on the <td> element 
-    rather than relying on a child <span>.
-    """
     if slot_key in booked_template_slots:
         return f'<td style="border: 1px solid #e0e0e0; padding: 8px; text-align: center; color: #2e7d32;"><i><b>Booked</b></i></td>'
     else:
@@ -327,11 +347,11 @@ for d in [date1, date2, date3]:
 <td style="border: 1px solid #e0e0e0; padding: 8px; text-align: center; color: #212121;">{tz_abbr}</td>
 </tr>"""
 
-# Note: The brackets `[]` have been entirely removed from the phone/email variables.
+
 email_html = f"""<div style="font-family: sans-serif; font-size: 14px; color: #212121; line-height: 1.5; background-color: #ffffff; padding: 20px; border-radius: 8px; border: 2px solid #2196F3;">
 <b>Following Up</b><br><br>
 1. Would you prefer us to call or continue over email?<br>
-2. If yes, is <b>{client_phone or 'PHONE NUMBER'}, {tz_abbr}</b> and <b>{client_email or 'EMAIL'}</b> the best way to reach you?<br>
+2. If yes, is <b>[PHONE NUMBER], {tz_abbr}</b> and <b>[EMAIL]</b> the best way to reach you?<br>
 3. We would like to do a screenshare, my current availability is shown below :<br><br>
 <table style="border-collapse: collapse; width: 100%; max-width: 800px; border: 1px solid #e0e0e0;">
 <tr style="background-color: #f8f9fa;">
@@ -350,7 +370,7 @@ email_html = f"""<div style="font-family: sans-serif; font-size: 14px; color: #2
 <li>If the above isn't possible, let me know your general availability for the week and I'll try to accommodate my schedule to yours.</li>
 </ul>
 <br>
-You can reach us by replying to this email or calling {support_phone or 'SUPPORT PHONE'} (provide the case number <b>{case_number or 'CASE NUMBER'}</b>). We're available from 5.00 A.M. to 5.00 P.M. (Pacific Time), Monday through Friday.
+You can reach us by replying to this email or calling [SUPPORT PHONE] (provide the case number <b>[CASE NUMBER]</b>). We're available from 5.00 A.M. to 5.00 P.M. (Pacific Time), Monday through Friday.
 </div>"""
 
 st.markdown(email_html, unsafe_allow_html=True)
