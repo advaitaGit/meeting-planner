@@ -80,7 +80,7 @@ if not st.session_state.authenticated:
                     supabase.table("staff_profiles").insert(data).execute()
                     st.success("Account created! You can now log in.")
                 except Exception as e:
-                    st.error("Username might already exist or database error occurred.")
+                    st.error(f"Error details: {e}")
             else:
                 st.warning("Please fill in both fields.")
     st.stop()
